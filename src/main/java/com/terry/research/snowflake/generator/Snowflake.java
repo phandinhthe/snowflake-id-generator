@@ -2,9 +2,8 @@ package com.terry.research.snowflake.generator;
 
 import lombok.Builder;
 
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
-import java.util.concurrent.TimeUnit;
+import java.security.SecureRandom;
+import java.time.Clock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class Snowflake {
@@ -20,9 +19,9 @@ public class Snowflake {
     private static final int SEQUENCE_BIT = 12;
 
     private static final long MAX_TIMESTAMP = (1L << TIMESTAMP_BIT) - 1;
-    private static final long MAX_SEQUENCE = (1L << SEQUENCE_BIT) - 1;
+    private static final int MAX_SEQUENCE = (1 << SEQUENCE_BIT) - 1;
 
-    private volatile long sequence = 1L;
+    private volatile int sequence = 0;
     private volatile long lastTimestamp = 0L;
     private final long customEpoch;
 
@@ -45,49 +44,49 @@ public class Snowflake {
         }
     }
 
-    ReentrantLock reentrantLock = new ReentrantLock(true);
+    SecureRandom random = new SecureRandom();
+    volatile int cnt = MAX_SEQUENCE;
 
     public synchronized long nextId() throws InterruptedException {
         long currentTimestamp = currentTimestamp();
-        while (!reentrantLock.tryLock(1L, TimeUnit.NANOSECONDS)) {
-
-        }
-        try {
-            if (currentTimestamp==lastTimestamp) {
-                sequence = (1 + sequence) & MAX_SEQUENCE;
-                if (sequence==0) {
-                    do {
-                        currentTimestamp = currentTimestamp();
-                    } while (currentTimestamp==lastTimestamp);
-                    sequence = 0;
-                }
-
-
-            } else if (currentTimestamp > lastTimestamp) {
-                sequence = 0;
-            } else {
-                throw new InterruptedException(String.format("current timestamp %d could not be less than the last timestamp %d", currentTimestamp, lastTimestamp));
+        if (currentTimestamp==lastTimestamp) {
+            if (cnt==0) {
+                do {
+                    currentTimestamp = currentTimestamp();
+                } while (currentTimestamp==lastTimestamp);
+                cnt = MAX_SEQUENCE;
+                sequence = random.nextInt(1 << SEQUENCE_BIT);
             }
-            lastTimestamp = currentTimestamp;
-            return (currentTimestamp << SEQUENCE_BIT) | sequence;
-        } finally {
-            reentrantLock.unlock();
+
+            ++sequence;
+            sequence = sequence & MAX_SEQUENCE;
+            cnt--;
+        } else if (currentTimestamp > lastTimestamp) {
+            sequence = random.nextInt(1 << SEQUENCE_BIT);
+            cnt--;
+        } else {
+            throw new InterruptedException(
+                String.format("current timestamp %d cannot be less than the last time %s stamp",
+                    currentTimestamp, lastTimestamp)
+            );
         }
+        lastTimestamp = currentTimestamp;
+        return (currentTimestamp << SEQUENCE_BIT) | sequence;
     }
 
-    public String nextUid() throws InterruptedException {
+    public String nextUid(String podName) throws InterruptedException {
         String uuid = encode(nextId());
         uuid = uuid + "A".repeat(11 - uuid.length());
-        return uuid;
+        return podName.toUpperCase() + uuid;
     }
 
     private long currentTimestamp() {
-        return MAX_TIMESTAMP & ZonedDateTime.now(ZoneId.of("UTC")).toInstant().toEpochMilli() - customEpoch;
+        return MAX_TIMESTAMP & Clock.systemUTC().millis() - customEpoch;
     }
 
-    private String encode(long result) {
+    public String encode(long result) {
         final int base = 32;
-        final char[] reserved = "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345".toCharArray();
+        final char[] reserved = "ABCDEFGHIJKLMNPQRSTUVWXYZ2456789".toCharArray();
         StringBuilder sb = new StringBuilder();
 
         while (result!=0) {

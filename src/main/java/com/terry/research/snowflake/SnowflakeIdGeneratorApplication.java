@@ -4,6 +4,8 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
+import java.time.*;
+
 @SpringBootApplication
 public class SnowflakeIdGeneratorApplication implements CommandLineRunner {
 
@@ -13,6 +15,10 @@ public class SnowflakeIdGeneratorApplication implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
+        println(System.currentTimeMillis());
+        println(Clock.systemUTC().millis());
+        println(Instant.now().toEpochMilli());
+        println(ZonedDateTime.now(ZoneId.of("UTC")).toInstant().toEpochMilli());
     }
 
     /**

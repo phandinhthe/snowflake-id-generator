@@ -1,7 +1,10 @@
 package com.terry.research.snowflake;
 
+import com.github.f4b6a3.tsid.Tsid;
+import com.github.f4b6a3.tsid.TsidCreator;
 import com.terry.research.snowflake.generator.Snowflake;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
@@ -10,13 +13,13 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.security.SecureRandom;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.StringJoiner;
+import java.util.*;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+@Slf4j
 class SnowflakeIdGeneratorApplicationTests {
     String randomAddress() {
         SecureRandom secureRandom = new SecureRandom();
@@ -53,42 +56,66 @@ class SnowflakeIdGeneratorApplicationTests {
         return sb.reverse().toString();
     }
 
+    public String podName() {
+        return "26GHI";
+    }
+
+    long customEpoch = 1420070400000L;
+    Snowflake snowflake = Snowflake.instance(customEpoch);
+
+    public long nextId() {
+        try {
+            return snowflake.nextId();
+        } catch (InterruptedException e) {
+            System.err.println(
+                "Interrupted exception"
+            );
+            log.error("error", e);
+        }
+        return 0L;
+    }
+
     @SneakyThrows
     @Test
-    void testPerformance() throws InterruptedException {
-        String address = randomAddress();
-        address = encodeAddress(address);
-        long customEpoch = 1420070400000L;
-        Snowflake snowflake = Snowflake.builder().customEpoch(customEpoch).build();
+    void testPerformance() {
         int iteration = 1_000_000;
         ExecutorService executorService = Executors.newFixedThreadPool(4);
-        Future<String>[] futures = new Future[iteration];
+        Future<Long>[] futures = new Future[iteration];
         long start = System.currentTimeMillis();
-        final String encodedAddress = address;
+        CountDownLatch countDownLatch = new CountDownLatch(iteration);
+
         try {
             for (int i = 0; i < iteration; i++) {
                 futures[i] = executorService.submit(() -> {
-                    String id = snowflake.nextUid();
-                    return encodedAddress + id;
+//                    Tsid tsid = TsidCreator.getTsid();
+//                    String uid = tsid.encode(36);
+                    long id = nextId();
+                    countDownLatch.countDown();
+                    return id;
                 });
             }
-
+            countDownLatch.await();
             long end = System.currentTimeMillis();
             System.err.printf("generate %,3d in %3d ms\r%n", iteration, (end - start));
-            System.err.printf("Performance %.3f ops/millisecond\r%n", iteration * 1F / (end - start));
+            System.err.printf("Performance %,3d ops/millisecond\r%n", iteration / (end - start));
 
+            if (iteration >= 10_000_000) {
+                executorService.shutdownNow();
+                System.exit(1);
+            }
+            // if interations is over > 10_000_000, skip output file.
             File file = new File(System.getProperty("user.dir").concat("/").concat("snowflake.txt"));
             try (FileOutputStream outputStream = new FileOutputStream(file)) {
                 Set<String> set = new HashSet<>(iteration);
                 int batch = 0;
-                for (Future<String> future : futures) {
-                    String s = future.get();
+                for (Future<Long> future : futures) {
+                    String s = podName() + snowflake.encode(future.get());
                     if (set.contains(s)) {
                         System.err.println("Failed!!! " + s);
                         break;
                     }
                     set.add(s);
-                    outputStream.write(future.get().concat("\t").getBytes());
+                    outputStream.write(s.concat("\t").getBytes());
                     if (batch++ < 100) continue;
                     outputStream.write("\r\n".getBytes());
                     batch = 0;
